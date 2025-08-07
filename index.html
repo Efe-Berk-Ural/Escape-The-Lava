@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Escape the Lava - Full Game</title>
+<style>
+  body, html {
+    margin:0; padding:0; height:100%;
+    background: #111;
+    color: white;
+    font-family: Arial, sans-serif;
+    overflow: hidden;
+    user-select: none;
+    display: flex; justify-content: center; align-items: center;
+    flex-direction: column;
+  }
+  canvas {
+    background: linear-gradient(to bottom, #001022 0%, #330000 100%);
+    border-radius: 10px;
+    box-shadow: 0 0 10px #f40;
+    touch-action: none;
+  }
+  #ui {
+    margin-top: 10px;
+    width: 320px;
+    display: flex;
+    justify-content: space-around;
+  }
+  button.control {
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+    border-radius: 10px;
+    border: none;
+    background: #222;
+    color: white;
+    user-select: none;
+  }
+  button.control:active {
+    background: #f40;
+  }
+  #menu, #shop {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #222;
+    padding: 15px 30px;
+    border-radius: 10px;
+    box-shadow: 0 0 15px #f40;
+    text-align: center;
+    display: none;
+    z-index: 10;
+  }
+  #menu button, #shop button {
+    margin: 10px;
+    padding: 10px 20px;
+    font-size: 18px;
+    cursor: pointer;
+    border-radius: 8px;
+    border: none;
+    background: #f40;
+    color: white;
+    user-select: none;
+  }
+  #shop-list {
+    margin-top: 10px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: #111;
+    border: 1px solid #f40;
+    padding: 10px;
+    border-radius: 8px;
+  }
+  .skin-item {
+    padding: 8px;
+    margin: 5px 0;
+    border: 1px solid #555;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .skin-item.owned {
+    border-color: #0f0;
+  }
+  .skin-item.selected {
+    background: #f40;
+  }
+  .skin-emoji {
+    font-size: 24px;
+  }
+  #footer {
+    position: fixed;
+    bottom: 5px;
+    width: 100%;
+    text-align: center;
+    color: #888;
+    font-size: 14px;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game" width="320" height="480"></canvas>
+
+<div id="menu">
+  <h2>Escape the Lava</h2>
+  <button id="startBtn">Start Game</button>
+  <button id="shopBtn">Shop</button>
+</div>
+
+<div id="shop">
+  <h3>Shop</h3>
+  <div id="starsCount">Stars: 0</div>
+  <div id="shop-list"></div>
+  <button id="backBtn">Back to Menu</button>
+</div>
+
+<div id="ui">
+  <button class="control" id="leftBtn">←</button>
+  <button class="control" id="upBtn">↑</button>
+  <button class="control" id="rightBtn">→</button>
+</div>
+
+<div id="footer">© Efe Berk Ural</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // DOM elemanları
+  const menu = document.getElementById('menu');
+  const shop = document.getElementById('shop');
+  const startBtn = document.getElementById('startBtn');
+  const shopBtn = document.getElementById('shopBtn');
+  const backBtn = document.getElementById('backBtn');
+  const starsCountEl = document.getElementById('starsCount');
+  const shopList = document.getElementById('shop-list');
+  const ui = document.getElementById('ui');
+
+  // Oyun ayarları
+  const worldHeight = 8000;
+  const worldWidth = 320;
+  let cameraY = worldHeight - H;
+
+  // Karakter ve oyun durumu
+  let player = {
+    width: 40,
+    height: 40,
+    x: W/2 - 20,
+    y: worldHeight - 100,
+    vy: 0,
+    gravity: 0.8,
+    jumpPower: -15,
+    speed: 5,
+    onGround: false,
+    emoji: '🧗‍♂️',
+    skinIndex: 0
+  };
+
+  // Platformlar
+  let platforms = [];
+
+  // Yıldızlar
+  let stars = [];
+
+  // Oyun durumu
+  let elapsedTime = 0;
+  let lastTimestamp = 0;
+  let lavaY = worldHeight;
+  let lavaBaseSpeed = 20;
+  let lavaSpeedMultiplier = 1;
+  let starsCollected = 0;
+
+  // Kontroller
+  let keys = {left:false, right:false, up:false};
+
+  // Skinler (emoji ve fiyat)
+  const skins = [
+    {emoji: '🧗‍♂️', price: 0},  // Default, ücretsiz
+    {emoji: '🦸‍♂️', price: 10},
+    {emoji: '🧙‍♂️', price: 20},
+    {emoji: '👽', price: 30},
+    {emoji: '🤖', price: 40},
+  ];
+
+  // Satın alınan skinler ve yıldızlar
+  let ownedSkins = [0];
+
+  // Oyun bitiş flagi
+  let gameOver = false;
+
+  // Menü göster
+  function showMenu(){
+    menu.style.display = 'block';
+    shop.style.display = 'none';
+    ui.style.display = 'none';
+  }
+
+  // Shop göster
+  function showShop(){
+    menu.style.display = 'none';
+    shop.style.display = 'block';
+    ui.style.display = 'none';
+    updateShopList();
+    updateStarsCount();
+  }
+
+  // Oyun başlat
+  function startGame(){
+    gameOver = false;    // Oyun durumu sıfırla
+    menu.style.display = 'none';
+    shop.style.display = 'none';
+    ui.style.display = 'flex';
+    resetGame();
+    lastTimestamp = 0;
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Reset oyun
+  function resetGame(){
+    player.x = W/2 - 20;
+    player.y = worldHeight - 100;
+    player.vy = 0;
+    lavaY = worldHeight;
+    lavaSpeedMultiplier = 1;
+    elapsedTime = 0;
+    starsCollected = 0;
+    keys = {left:false, right:false, up:false};
+    generateInitialPlatforms();
+    generateStars();
+  }
+
+  // Platform üret
+  function generateInitialPlatforms(){
+    platforms = [];
+    platforms.push({x:0, y: worldHeight - 50, width: W, height: 50});
+    let y = worldHeight - 150;
+    while(y > 0){
+      let w = 80 + Math.random()*80;
+      let x = Math.random()*(worldWidth - w);
+      platforms.push({x, y, width: w, height: 15});
+      y -= 60 + Math.random()*40;
+    }
+  }
+
+  // Yıldız üret
+  function generateStars(){
+    stars = [];
+    for(let i=0; i < 50; i++){
+      let p = platforms[Math.floor(Math.random() * platforms.length)];
+      if(p){
+        let starX = p.x + Math.random()*(p.width - 20);
+        let starY = p.y - 25;
+        stars.push({x: starX, y: starY, width: 20, height: 20, collected: false});
+      }
+    }
+  }
+
+  // Shop listesi güncelle
+  function updateShopList(){
+    shopList.innerHTML = '';
+    skins.forEach((skin, i) => {
+      const div = document.createElement('div');
+      div.className = 'skin-item';
+      if(ownedSkins.includes(i)) div.classList.add('owned');
+      if(player.skinIndex === i) div.classList.add('selected');
+      div.innerHTML = `<span class="skin-emoji">${skin.emoji}</span>
+                       <span>${skin.price} ⭐️</span>`;
+      div.onclick = () => {
+        if(ownedSkins.includes(i)){
+          player.skinIndex = i;
+          updateShopList();
+        } else {
+          if(starsCollected >= skin.price){
+            starsCollected -= skin.price;
+            ownedSkins.push(i);
+            player.skinIndex = i;
+            updateStarsCount();
+            updateShopList();
+          } else {
+            alert("Not enough stars!");
+          }
+        }
+      };
+      shopList.appendChild(div);
+    });
+  }
+
+  // Yıldız sayısını güncelle
+  function updateStarsCount(){
+    starsCountEl.textContent = `Stars: ${starsCollected}`;
+  }
+
+  // Tuş olayları
+  window.addEventListener('keydown', e => {
+    if(e.key === 'ArrowLeft') keys.left = true;
+    if(e.key === 'ArrowRight') keys.right = true;
+    if(e.key === 'ArrowUp') keys.up = true;
+  });
+  window.addEventListener('keyup', e => {
+    if(e.key === 'ArrowLeft') keys.left = false;
+    if(e.key === 'ArrowRight') keys.right = false;
+    if(e.key === 'ArrowUp') keys.up = false;
+  });
+
+  // Dokunmatik kontroller
+  const leftBtn = document.getElementById('leftBtn');
+  const rightBtn = document.getElementById('rightBtn');
+  const upBtn = document.getElementById('upBtn');
+
+  leftBtn.addEventListener('touchstart', e => { e.preventDefault(); keys.left = true; });
+  leftBtn.addEventListener('touchend', e => { e.preventDefault(); keys.left = false; });
+
+  rightBtn.addEventListener('touchstart', e => { e.preventDefault(); keys.right = true; });
+  rightBtn.addEventListener('touchend', e => { e.preventDefault(); keys.right = false; });
+
+  upBtn.addEventListener('touchstart', e => { e.preventDefault(); keys.up = true; });
+  upBtn.addEventListener('touchend', e => { e.preventDefault(); keys.up = false; });
+
+  // Sürekli yukarı platform ekle
+  function addPlatformsIfNeeded(){
+    const highest = platforms.reduce((min, p) => p.y < min ? p.y : min, worldHeight);
+    if(highest > 300){
+      let y = highest - (60 + Math.random()*40);
+      let w = 80 + Math.random()*80;
+      let x = Math.random()*(worldWidth - w);
+      platforms.push({x, y, width: w, height: 15});
+    }
+  }
+
+  // Oyun döngüsü
+  function gameLoop(timestamp=0){
+    if(gameOver) return;  // Oyun bittiyse durdur
+
+    if(!lastTimestamp) lastTimestamp = timestamp;
+    let delta = (timestamp - lastTimestamp)/1000;
+    lastTimestamp = timestamp;
+    elapsedTime += delta;
+
+    // Hareket
+    if(keys.left) player.x -= player.speed;
+    if(keys.right) player.x += player.speed;
+    if(player.x < 0) player.x = 0;
+    if(player.x + player.width > W) player.x = W - player.width;
+
+    // Zıplama
+    if(keys.up && player.onGround){
+      player.vy = player.jumpPower;
+      player.onGround = false;
+    }
+
+    // Yerçekimi
+    player.vy += player.gravity;
+    player.y += player.vy;
+
+    // Platform kontrolü
+    player.onGround = false;
+    for(let p of platforms){
+      if(
+        player.x + player.width > p.x &&
+        player.x < p.x + p.width &&
+        player.y + player.height > p.y &&
+        player.y + player.height < p.y + p.height + 10 &&
+        player.vy >= 0
+      ){
+        player.y = p.y - player.height;
+        player.vy = 0;
+        player.onGround = true;
+      }
+    }
+
+    // Yıldız toplama
+    stars.forEach(star => {
+      if(!star.collected &&
+         player.x < star.x + star.width &&
+         player.x + player.width > star.x &&
+         player.y < star.y + star.height &&
+         player.y + player.height > star.y){
+        star.collected = true;
+        starsCollected++;
+        updateStarsCount();
+      }
+    });
+
+    // Kamera oyuncuyu takip eder
+    cameraY = player.y - H/2;
+    if(cameraY < 0) cameraY = 0;
+
+    // Lav hız artışı her dakika
+    if(Math.floor(elapsedTime) > 0 && Math.floor(elapsedTime) % 60 === 0){
+      lavaSpeedMultiplier = 1 + Math.floor(elapsedTime/60);
+    }
+
+    // Lav yükseliyor
+    lavaY -= lavaBaseSpeed * lavaSpeedMultiplier * delta;
+    if(lavaY < 0) lavaY = 0;
+
+    // Game over kontrolü
+    if(player.y + player.height > lavaY){
+      gameOver = true;   // Oyunu durdur
+      alert(`Game Over! Lava got you.\nStars collected: ${starsCollected}`);
+      showMenu();
+      return;  // Döngüyü kes
+    }
+
+    // Yeni platform ekle
+    addPlatformsIfNeeded();
+
+    // Temizle
+    ctx.clearRect(0,0,W,H);
+
+    // Platformları çiz
+    ctx.fillStyle = '#888';
+    for(let p of platforms){
+      ctx.fillRect(p.x, p.y - cameraY, p.width, p.height);
+    }
+
+    // Yıldızları çiz
+    ctx.font = '28px serif';
+    ctx.textBaseline = 'top';
+    stars.forEach(star => {
+      if(!star.collected){
+        ctx.fillText('⭐️', star.x, star.y - cameraY);
+      }
+    });
+
+    // Karakter çiz
+    ctx.font = `${player.height}px serif`;
+    ctx.fillText(skins[player.skinIndex].emoji, player.x, player.y - cameraY);
+
+    // Lav çiz
+    ctx.fillStyle = 'orangered';
+    ctx.fillRect(0, lavaY - cameraY, W, H - (lavaY - cameraY));
+
+    // Bilgi metinleri
+    ctx.fillStyle = 'white';
+    ctx.font = '18px Arial';
+    ctx.fillText(`Time: ${Math.floor(elapsedTime)}s`, 10, 20);
+    ctx.fillText(`Stars: ${starsCollected}`, 10, 40);
+    ctx.fillText(`Lava speed x${lavaSpeedMultiplier.toFixed(1)}`, 10, 60);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Buton eventleri
+  startBtn.onclick = () => startGame();
+  shopBtn.onclick = () => showShop();
+  backBtn.onclick = () => showMenu();
+
+  // Başlangıçta menüyü göster
+  showMenu();
+})();
+</script>
+
+</body>
+</html>
